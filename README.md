@@ -1,105 +1,106 @@
-# ircord
+# ircord CLI
 
-Command-line management tool for IRCord server.
-
-## Overview
-
-`ircord` is a CLI binary for managing a running IRCord server instance. It connects to the server's admin socket (named pipe on Windows, Unix domain socket on Linux) and sends commands using the existing JSON-over-length-prefixed-frame protocol.
+Command-line management tool for IRCord server. Controls a running server via the admin socket.
 
 ## Features
 
-- **Builtin commands**: shutdown, restart, status, kick, ban, users, logtail, tui
-- **Script commands**: extend with JavaScript (QuickJS) scripts in `~/.ircord/commands/`
-- **Streaming**: `logtail` streams server logs in real-time
-- **Interactive**: `tui` opens the full admin TUI
+- **Fire-and-forget commands** — status, users, shutdown, restart, kick, ban, update
+- **Streaming commands** — logtail for real-time log viewing
+- **Interactive mode** — launch TUI for full admin interface
+- **Extensible** — Phase 4 will add QuickJS script commands
 
 ## Usage
 
 ```bash
-# Server management
-ircord status              # Show server uptime, version, user count
-ircord shutdown            # Graceful server shutdown
-ircord restart             # Restart the server
-ircord update              # Pull latest + rebuild + restart
+# Show help
+ircord help
 
-# User management
-ircord users               # List online users
-ircord kick <user> [reason]
-ircord ban <user> [reason]
+# Show server status
+ircord status
 
-# Monitoring
-ircord logtail             # Stream server logs (Ctrl+C to stop)
-ircord logtail --level warn # Filter by log level
+# List online users
+ircord users
 
-# Admin TUI
-ircord tui                 # Open interactive admin TUI
+# Kick/ban users
+ircord kick <username> [reason]
+ircord ban <username> [reason]
 
-# Help
-ircord help                # List all commands
-ircord help <command>      # Help for specific command
-ircord version             # Show CLI version
+# Stream logs in real-time
+ircord logtail
+ircord logtail --level error    # filter by level
+
+# Shut down or restart server
+ircord shutdown
+ircord restart
+
+# Update server (server-side)
+ircord update
+
+# Launch interactive TUI
+ircord tui
+
+# Custom socket path
+ircord --socket /path/to/socket status
 ```
-
-## Script Commands
-
-Place `.js` files in `~/.ircord/commands/` to add custom commands:
-
-```js
-// ~/.ircord/commands/deploy.js
-export const command = {
-    name: "deploy",
-    description: "Pull latest and rebuild server",
-};
-
-export async function execute(ctx) {
-    ctx.print("Pulling latest...");
-    await ircord.exec("git", ["pull"]);
-    ctx.print("Building...");
-    await ircord.exec("cmake", ["--build", "build"]);
-    await ctx.admin.send("restart", {});
-    ctx.print("Done!");
-}
-```
-
-Scripts have access to:
-- `ctx.admin` — admin socket client (send commands, receive events)
-- `ctx.print()` — output to terminal
-- `ctx.args` — command-line arguments
-- `ircord.exec()` — run shell commands
-- `ircord.fs` — filesystem operations
 
 ## Building
 
-```bash
-cmake -B build -DCMAKE_BUILD_TYPE=Release
-cmake --build build
+### Windows
+
+```powershell
+cmake -S ircord -B build/ircord `
+  -DCMAKE_BUILD_TYPE=Release `
+  -DCMAKE_PREFIX_PATH="ircord-client/vcpkg_installed/x64-windows/share"
+  
+cmake --build build/ircord --config Release
 ```
+
+### Linux
+
+```bash
+cmake -S ircord -B build/ircord -DCMAKE_BUILD_TYPE=Release
+cmake --build build/ircord
+```
+
+## Exit Codes
+
+| Code | Meaning |
+|------|---------|
+| 0 | Success |
+| 1 | Command error (unknown command, invalid args, server error) |
+| 2 | Connection error (server not running) |
+
+## Admin Socket
+
+The CLI connects to the server's admin socket:
+
+- **Windows**: `\\.\pipe\ircord-admin`
+- **Linux**: `$XDG_RUNTIME_DIR/ircord-admin.sock` or `/tmp/ircord-admin.sock`
+
+Use `--socket <path>` to override.
 
 ## Architecture
 
 ```
-ircord (CLI binary)
-  |
-  +-- CommandRegistry
-  |     +-- BuiltinCommand (C++ compiled)
-  |     +-- ScriptCommand  (QuickJS runtime)
-  |
-  +-- AdminSocketClient (from ircord-server-tui library)
-  |     +-- Named pipe (Windows) / Unix socket (Linux)
-  |     +-- 4-byte BE length prefix + JSON
-  |
-  +-- ScriptEngine (QuickJS, from ircord-plugin)
-        +-- ircord.exec, ircord.fs APIs
-        +-- ctx.admin bridge to AdminSocketClient
+┌──────────────┐      admin socket      ┌──────────────┐
+│  ircord CLI  │  ◄──────────────────►  │ ircord-server │
+│              │    JSON protocol       │               │
+│  - status    │   (named pipe /        │  AdminSocket  │
+│  - kick/ban  │    unix socket)        │  Listener     │
+│  - logtail   │                        │               │
+│  - tui       │                        │  handle_admin │
+└──────────────┘                        └──────────────┘
 ```
 
 ## Dependencies
 
-- [ircord-server-tui](https://github.com/hittoSepi/ircord-server-tui) — AdminSocketClient, admin protocol
-- [ircord-plugin](../ircord-plugin/) — QuickJS engine for script commands
-- [nlohmann/json](https://github.com/nlohmann/json) — JSON serialization
-- [Boost.Asio](https://www.boost.org/) — async I/O for admin socket
+| Dependency | Source | Purpose |
+|------------|--------|---------|
+| ircord-server-tui | `../ircord-server-tui` | AdminSocketClient, protocol |
+| nlohmann/json | vcpkg / FetchContent | JSON |
+| Boost.Asio | vcpkg | Async I/O |
+| spdlog | vcpkg | Logging (via ircord-server-tui) |
 
 ## License
 
-Part of the IRCord project.
+Same as [ircord-server](https://github.com/hittoSepi/ircord-server).
